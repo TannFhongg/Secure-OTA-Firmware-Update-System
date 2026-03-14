@@ -1,0 +1,23 @@
+# Minimal OTA Configuration
+
+# Partition Table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partition_table/partitions.csv"
+
+# Bootloader - Không cần rollback cho demo đơn giản
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n
+
+# WiFi - Thay đổi theo mạng của bạn
+CONFIG_EXAMPLE_WIFI_SSID="YOUR_WIFI_SSID"
+CONFIG_EXAMPLE_WIFI_PASSWORD="YOUR_WIFI_PASSWORD"
+
+# OTA URL - Thay YOUR_IP bằng IP máy tính chạy server
+CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL="http://192.168.1.100:8070/esp32-secure-ota.bin"
+
+# Cho phép HTTP (không HTTPS)
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
+
+# Logging
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+

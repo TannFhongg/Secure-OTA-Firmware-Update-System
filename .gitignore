@@ -1,0 +1,15 @@
+# Build files
+build/
+sdkconfig
+sdkconfig.old
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Documentation (không commit)
+*.md
