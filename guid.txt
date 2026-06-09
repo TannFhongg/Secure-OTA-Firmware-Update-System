@@ -1,0 +1,19 @@
+# 1. Cấu hình WiFi
+idf.py menuconfig
+# → Example Connection Configuration
+
+# 2. Build và flash
+idf.py build
+idf.py -p COM3 flash monitor
+
+# 3. Sửa code (tạo v2)
+# Thêm log vào main/main_simple.c
+
+# 4. Build lại
+idf.py build
+
+# 5. Chạy server
+cd scripts
+python ota_server.py
+
+# 6. Quan sát OTA tự động!

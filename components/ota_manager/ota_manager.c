@@ -1,7 +1,3 @@
-/**
- * @file ota_manager.c
- * @brief Minimal OTA Implementation - HTTP only, no security
- */
 
 #include "ota_manager.h"
 #include <string.h>
@@ -19,7 +15,7 @@ static const char *TAG = "OTA_SIMPLE";
 
 esp_err_t ota_init(void)
 {
-    ESP_LOGI(TAG, "=== OTA Manager Init ===");
+    ESP_LOGI(TAG, "OTA Manager Init");
     
     // Lấy thông tin partition đang chạy
     const esp_partition_t *running = esp_ota_get_running_partition();
@@ -41,10 +37,9 @@ esp_err_t ota_init(void)
 
 esp_err_t ota_update(const char *url)
 {
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "  Starting OTA Update");
-    ESP_LOGI(TAG, "========================================");
+
+    ESP_LOGI(TAG, "Starting OTA Update");
+   
     ESP_LOGI(TAG, "URL: %s", url);
     
     esp_err_t err;
@@ -162,12 +157,7 @@ esp_err_t ota_update(const char *url)
     
     ESP_LOGI(TAG, "  Boot partition set to: %s", update_partition->label);
     
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "  OTA Update SUCCESS!");
-    ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Rebooting in 3 seconds...");
     
     vTaskDelay(pdMS_TO_TICKS(3000));
     esp_restart();
