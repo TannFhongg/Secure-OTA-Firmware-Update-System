@@ -1,0 +1,25 @@
+menu "Secure OTA Example"
+
+    config EXAMPLE_FIRMWARE_UPGRADE_URL
+        string "Firmware upgrade HTTPS URL"
+        default "https://example.com/esp32-secure-ota.bin"
+        help
+            HTTPS URL of the firmware image. The OTA manager rejects plain HTTP.
+
+    config EXAMPLE_AUTO_OTA_ON_BOOT
+        bool "Run OTA check automatically on boot"
+        default n
+        help
+            Enable only when a trusted HTTPS update server is available. Keeping
+            this disabled avoids flashing the same image on every reset.
+
+    config EXAMPLE_USE_CERT_BUNDLE
+        bool "Use ESP x509 certificate bundle for OTA HTTPS"
+        default y
+        depends on MBEDTLS_CERTIFICATE_BUNDLE
+        help
+            Use the built-in trusted root certificate bundle for public HTTPS
+            servers. For private/self-signed OTA servers, add the CA to a custom
+            certificate bundle in local sdkconfig.
+
+endmenu

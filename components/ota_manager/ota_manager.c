@@ -1,17 +1,58 @@
 
-#include "ota_manager.h"
 #include <string.h>
+
+#include "ota_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
-#include "esp_app_format.h"
+#include "esp_https_ota.h"
+#include "esp_app_desc.h"
+
+#ifdef CONFIG_EXAMPLE_USE_CERT_BUNDLE
+#include "esp_crt_bundle.h"
+#endif
 
 static const char *TAG = "OTA_SIMPLE";
 
-#define BUFFER_SIZE 1024
+#define OTA_PROGRESS_STEP_BYTES (50 * 1024)
+
+static esp_err_t validate_image_header(const esp_app_desc_t *new_app_info)
+{
+    if (new_app_info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (new_app_info->magic_word != ESP_APP_DESC_MAGIC_WORD) {
+        ESP_LOGE(TAG, "Invalid app descriptor magic word: 0x%lx", new_app_info->magic_word);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_app_desc_t running_app_info = {0};
+    esp_err_t err = esp_ota_get_partition_description(running, &running_app_info);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read running app description: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "  Current version: %s", running_app_info.version);
+    ESP_LOGI(TAG, "  New version:     %s", new_app_info->version);
+
+    if (memcmp(new_app_info->version, running_app_info.version, sizeof(new_app_info->version)) == 0) {
+        ESP_LOGW(TAG, "New image version is the same as the running image; skipping OTA");
+        return ESP_ERR_INVALID_VERSION;
+    }
+
+    return ESP_OK;
+}
+
+static bool ota_url_uses_https(const char *url)
+{
+    return url != NULL && strncmp(url, "https://", strlen("https://")) == 0;
+}
 
 esp_err_t ota_init(void)
 {
@@ -37,130 +78,140 @@ esp_err_t ota_init(void)
 
 esp_err_t ota_update(const char *url)
 {
-
     ESP_LOGI(TAG, "Starting OTA Update");
-   
+
+    if (!ota_url_uses_https(url)) {
+        ESP_LOGE(TAG, "OTA URL must use HTTPS with certificate validation: %s", url ? url : "(null)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     ESP_LOGI(TAG, "URL: %s", url);
-    
-    esp_err_t err;
-    esp_ota_handle_t update_handle = 0;
-    const esp_partition_t *update_partition = NULL;
-    
-    // BƯỚC 1: Tìm partition để ghi firmware mới
+
+    esp_err_t err = ESP_OK;
+
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "[1/4] Finding next OTA partition...");
-    
+
     const esp_partition_t *running = esp_ota_get_running_partition();
-    update_partition = esp_ota_get_next_update_partition(NULL);
-    
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+
     if (update_partition == NULL) {
         ESP_LOGE(TAG, "No OTA partition found!");
         return ESP_FAIL;
     }
-    
+
     ESP_LOGI(TAG, "  Current: %s", running->label);
     ESP_LOGI(TAG, "  Target:  %s (0x%lx)", update_partition->label, update_partition->address);
-    
-    // BƯỚC 2: Kết nối HTTP và tải firmware
+
     ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "[2/4] Downloading firmware...");
-    
+    ESP_LOGI(TAG, "[2/4] Connecting with HTTPS...");
+
     esp_http_client_config_t config = {
         .url = url,
         .timeout_ms = 30000,
+        .keep_alive_enable = true,
+#ifdef CONFIG_EXAMPLE_USE_CERT_BUNDLE
+        .crt_bundle_attach = esp_crt_bundle_attach,
+#endif
     };
-    
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        ESP_LOGE(TAG, "Failed to init HTTP client");
-        return ESP_FAIL;
-    }
-    
-    err = esp_http_client_open(client, 0);
+
+    esp_https_ota_config_t ota_config = {
+        .http_config = &config,
+    };
+
+    esp_https_ota_handle_t https_ota_handle = NULL;
+    err = esp_https_ota_begin(&ota_config, &https_ota_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
+        ESP_LOGE(TAG, "esp_https_ota_begin failed: %s", esp_err_to_name(err));
         return err;
     }
-    
-    int content_length = esp_http_client_fetch_headers(client);
+
+    int status_code = esp_https_ota_get_status_code(https_ota_handle);
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "Unexpected HTTP status code: %d", status_code);
+        err = ESP_ERR_INVALID_RESPONSE;
+        goto ota_abort;
+    }
+
+    int content_length = esp_https_ota_get_image_size(https_ota_handle);
+    if (content_length <= 0) {
+        ESP_LOGE(TAG, "Invalid firmware content length: %d", content_length);
+        err = ESP_ERR_INVALID_SIZE;
+        goto ota_abort;
+    }
+
+    if ((uint32_t)content_length > update_partition->size) {
+        ESP_LOGE(TAG, "Firmware is larger than target partition: %d > %lu", content_length, update_partition->size);
+        err = ESP_ERR_INVALID_SIZE;
+        goto ota_abort;
+    }
+
     ESP_LOGI(TAG, "  Firmware size: %d bytes", content_length);
-    
-    // BƯỚC 3: Bắt đầu ghi vào partition
+
     ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "[3/4] Writing to partition %s...", update_partition->label);
-    
-    err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
+    ESP_LOGI(TAG, "[3/4] Verifying image header...");
+
+    esp_app_desc_t new_app_info = {0};
+    err = esp_https_ota_get_img_desc(https_ota_handle, &new_app_info);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        return err;
+        ESP_LOGE(TAG, "esp_https_ota_get_img_desc failed: %s", esp_err_to_name(err));
+        goto ota_abort;
     }
-    
-    char *buffer = malloc(BUFFER_SIZE);
-    if (buffer == NULL) {
-        ESP_LOGE(TAG, "Cannot allocate buffer");
-        esp_ota_abort(update_handle);
-        esp_http_client_cleanup(client);
-        return ESP_ERR_NO_MEM;
+
+    err = validate_image_header(&new_app_info);
+    if (err == ESP_ERR_INVALID_VERSION) {
+        esp_https_ota_abort(https_ota_handle);
+        ESP_LOGI(TAG, "OTA skipped; device is already running this firmware version");
+        return ESP_OK;
+    } else if (err != ESP_OK) {
+        goto ota_abort;
     }
-    
-    int binary_file_length = 0;
-    
+
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "[4/4] Downloading and writing to %s...", update_partition->label);
+
+    int last_logged = 0;
     while (1) {
-        int data_read = esp_http_client_read(client, buffer, BUFFER_SIZE);
-        if (data_read < 0) {
-            ESP_LOGE(TAG, "Error: data read error");
-            break;
-        } else if (data_read > 0) {
-            err = esp_ota_write(update_handle, (const void *)buffer, data_read);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
-                break;
-            }
-            binary_file_length += data_read;
-            
-            // In progress mỗi 50KB
-            if (binary_file_length % (50 * 1024) == 0) {
-                ESP_LOGI(TAG, "  Written: %d bytes", binary_file_length);
-            }
-        } else if (data_read == 0) {
-            ESP_LOGI(TAG, "  Download complete: %d bytes", binary_file_length);
+        err = esp_https_ota_perform(https_ota_handle);
+
+        int binary_file_length = esp_https_ota_get_image_len_read(https_ota_handle);
+        if (binary_file_length >= 0 && binary_file_length - last_logged >= OTA_PROGRESS_STEP_BYTES) {
+            ESP_LOGI(TAG, "  Written: %d bytes", binary_file_length);
+            last_logged = binary_file_length;
+        }
+
+        if (err != ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
             break;
         }
     }
-    
-    free(buffer);
-    esp_http_client_cleanup(client);
-    
+
     if (err != ESP_OK) {
-        esp_ota_abort(update_handle);
+        ESP_LOGE(TAG, "esp_https_ota_perform failed: %s", esp_err_to_name(err));
+        goto ota_abort;
+    }
+
+    if (!esp_https_ota_is_complete_data_received(https_ota_handle)) {
+        ESP_LOGE(TAG, "Complete OTA image was not received");
+        err = ESP_ERR_INVALID_SIZE;
+        goto ota_abort;
+    }
+
+    err = esp_https_ota_finish(https_ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_https_ota_finish failed: %s", esp_err_to_name(err));
         return err;
     }
-    
-    // Kết thúc OTA
-    err = esp_ota_end(update_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
-        return err;
-    }
-    
-    // BƯỚC 4: Đặt partition mới làm boot partition
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "[4/4] Setting boot partition...");
-    
-    err = esp_ota_set_boot_partition(update_partition);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
-        return err;
-    }
-    
-    ESP_LOGI(TAG, "  Boot partition set to: %s", update_partition->label);
-    
-    ESP_LOGI(TAG, "  OTA Update SUCCESS!");
-    
+
+    ESP_LOGI(TAG, "OTA Update SUCCESS; rebooting into new partition");
+
     vTaskDelay(pdMS_TO_TICKS(3000));
     esp_restart();
-    
+
     return ESP_OK;
+
+ota_abort:
+    if (https_ota_handle != NULL) {
+        esp_https_ota_abort(https_ota_handle);
+    }
+    return err;
 }

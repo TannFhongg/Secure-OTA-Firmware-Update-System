@@ -11,17 +11,14 @@ extern "C" {
 esp_err_t ota_init(void);
 
 /**
-Thực hiện OTA update đơn giản
- * 
-Quy trình:
-1. Kết nối HTTP server
-2. Tải firmware
-3. Ghi vào partition trống (ota_0 hoặc ota_1)
-4. Đánh dấu partition mới là boot partition
-5. Reboot
- 
-URL của firmware (HTTP)
-return ESP_OK nếu thành công
+ * Perform an HTTPS OTA update.
+ *
+ * The OTA manager validates the HTTPS response, checks the incoming app
+ * descriptor before flashing the full image, skips same-version updates, and
+ * lets esp_https_ota validate the final image before switching boot partition.
+ *
+ * url must use https:// and have a trusted server certificate.
+ * Returns ESP_OK when the update succeeds or when the same version is skipped.
  */
 esp_err_t ota_update(const char *url);
 

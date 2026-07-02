@@ -1,19 +1,21 @@
-# 1. Cấu hình WiFi
+# 1. Configure local WiFi and OTA settings
 idf.py menuconfig
-# → Example Connection Configuration
+# -> Example Connection Configuration: set WiFi SSID/password
+# -> Secure OTA Example: set HTTPS firmware URL
+# -> Secure OTA Example: enable auto OTA on boot only when needed
 
-# 2. Build và flash
+# 2. Build and flash
 idf.py build
 idf.py -p COM3 flash monitor
 
-# 3. Sửa code (tạo v2)
-# Thêm log vào main/main_simple.c
-
-# 4. Build lại
+# 3. Build a new firmware version
+# Change PROJECT_VER or set a new app version so same-version OTA is skipped.
 idf.py build
 
-# 5. Chạy server
-cd scripts
-python ota_server.py
+# 4. Host firmware on a trusted HTTPS server
+# The firmware URL must be https:// and the certificate chain must be trusted
+# by the ESP x509 certificate bundle or by your custom local CA bundle.
 
-# 6. Quan sát OTA tự động!
+# 5. Production signing
+# Generate and keep signing keys outside the repo, then enable signed app
+# verification in local sdkconfig/menuconfig before field deployment.

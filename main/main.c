@@ -5,6 +5,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "nvs_flash.h"
 #include "protocol_examples_common.h"
 
@@ -12,10 +13,27 @@
 
 static const char *TAG = "MAIN";
 
-// Cấu hình WiFi và OTA URL
-#define WIFI_SSID      CONFIG_EXAMPLE_WIFI_SSID
-#define WIFI_PASS      CONFIG_EXAMPLE_WIFI_PASSWORD
-#define OTA_URL        CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL
+#define OTA_URL CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL
+
+static void mark_running_app_valid_after_checkpoint(void)
+{
+#if CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+
+    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
+        ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+        ESP_LOGI(TAG, "New OTA image is pending verification; validating after WiFi checkpoint");
+
+        esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "OTA image marked valid; rollback cancelled");
+        } else {
+            ESP_LOGE(TAG, "Failed to mark OTA image valid: %s", esp_err_to_name(err));
+        }
+    }
+#endif
+}
 
 void app_main(void)
 {
@@ -44,36 +62,26 @@ void app_main(void)
     ESP_ERROR_CHECK(example_connect());
     
     ESP_LOGI(TAG, "WiFi connected!");
-    
 
-    ESP_LOGI(TAG, "  1. Build firmware mới:");
-    ESP_LOGI(TAG, "idf.py build");
-   
-    ESP_LOGI(TAG, "2. Chạy HTTP server:");
-    ESP_LOGI(TAG, "python scripts/ota_server.py");
-   
-    ESP_LOGI(TAG, "3. Đợi 10 giây...");
-   
-    
-    
-    for (int i = 10; i > 0; i--) {
-        ESP_LOGI(TAG, "OTA update sẽ bắt đầu sau %d giây...", i);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-    
+    mark_running_app_valid_after_checkpoint();
+
+#if CONFIG_EXAMPLE_CONNECT_WIFI
+    esp_wifi_set_ps(WIFI_PS_NONE);
+#endif
+
+#if CONFIG_EXAMPLE_AUTO_OTA_ON_BOOT
     ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Bắt đầu OTA update!");
-    
-    // Thực hiện OTA
+    ESP_LOGI(TAG, "Auto OTA is enabled; checking for update at: %s", OTA_URL);
+
     esp_err_t err = ota_update(OTA_URL);
-    
+
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "OTA update failed!");
-        ESP_LOGE(TAG, "Kiểm tra:");
-        ESP_LOGE(TAG, "  - HTTP server đang chạy?");
-        ESP_LOGE(TAG, "  - URL đúng? %s", OTA_URL);
-        ESP_LOGE(TAG, "  - File .bin tồn tại?");
+        ESP_LOGE(TAG, "OTA update failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Check HTTPS URL, server certificate trust, and firmware .bin availability");
     }
+#else
+    ESP_LOGI(TAG, "Auto OTA on boot is disabled; enable CONFIG_EXAMPLE_AUTO_OTA_ON_BOOT to update from %s", OTA_URL);
+#endif
     
     // Nếu OTA thất bại, chạy app bình thường
     while (1) {

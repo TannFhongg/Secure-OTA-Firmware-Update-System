@@ -3,6 +3,11 @@ build/
 sdkconfig
 sdkconfig.old
 
+# Local security material
+secure_boot_signing_key.pem
+signature_verification_key.bin
+*.key
+
 # IDE
 .vscode/
 .idea/
