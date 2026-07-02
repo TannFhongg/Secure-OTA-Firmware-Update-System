@@ -14,7 +14,8 @@ import socketserver
 
 
 PORT = 8070
-FIRMWARE_DIR = "../build"
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FIRMWARE_DIR = os.path.join(PROJECT_DIR, "build")
 FIRMWARE_NAME = "esp32-secure-ota.bin"
 
 
@@ -34,9 +35,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
-
     cert_path = os.path.abspath(args.cert)
     key_path = os.path.abspath(args.key)
     firmware_path = os.path.abspath(os.path.join(FIRMWARE_DIR, FIRMWARE_NAME))
@@ -51,6 +49,7 @@ if __name__ == "__main__":
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certfile=cert_path, keyfile=key_path)
 
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer((args.host, args.port), OTAHandler) as httpd:
         httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
         print(f"Starting HTTPS OTA server on port {args.port}")

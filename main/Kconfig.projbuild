@@ -19,7 +19,8 @@ menu "Secure OTA Example"
         depends on MBEDTLS_CERTIFICATE_BUNDLE
         help
             Use the built-in trusted root certificate bundle for public HTTPS
-            servers. For private/self-signed OTA servers, add the CA to a custom
-            certificate bundle in local sdkconfig.
+            servers. For private/self-signed OTA servers, put the public server
+            certificate at certs/ota_server_cert.pem; the OTA manager will pin
+            that embedded certificate when it is present.
 
 endmenu

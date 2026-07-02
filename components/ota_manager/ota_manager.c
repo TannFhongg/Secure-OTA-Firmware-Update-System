@@ -1,18 +1,22 @@
-
+#include <stdbool.h>
 #include <string.h>
 
 #include "ota_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_system.h"
-#include "esp_log.h"
-#include "esp_ota_ops.h"
+#include "esp_app_desc.h"
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
-#include "esp_app_desc.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
 
 #ifdef CONFIG_EXAMPLE_USE_CERT_BUNDLE
 #include "esp_crt_bundle.h"
+#endif
+
+#ifdef OTA_SERVER_CERT_EMBEDDED
+extern const char ota_server_cert_pem_start[] asm("_binary_ota_server_cert_pem_start");
 #endif
 
 static const char *TAG = "OTA_SIMPLE";
@@ -57,22 +61,28 @@ static bool ota_url_uses_https(const char *url)
 esp_err_t ota_init(void)
 {
     ESP_LOGI(TAG, "OTA Manager Init");
-    
-    // Lấy thông tin partition đang chạy
+
     const esp_partition_t *running = esp_ota_get_running_partition();
-    
+
     ESP_LOGI(TAG, "Running partition:");
     ESP_LOGI(TAG, "  - Label: %s", running->label);
     ESP_LOGI(TAG, "  - Address: 0x%lx", running->address);
     ESP_LOGI(TAG, "  - Size: %lu bytes", running->size);
-    
-    // Lấy thông tin app
+
     esp_app_desc_t app_desc;
     if (esp_ota_get_partition_description(running, &app_desc) == ESP_OK) {
         ESP_LOGI(TAG, "  - Version: %s", app_desc.version);
         ESP_LOGI(TAG, "  - Compiled: %s %s", app_desc.date, app_desc.time);
     }
-    
+
+#ifdef OTA_SERVER_CERT_EMBEDDED
+    ESP_LOGI(TAG, "HTTPS trust source: embedded OTA server certificate");
+#elif defined(CONFIG_EXAMPLE_USE_CERT_BUNDLE)
+    ESP_LOGI(TAG, "HTTPS trust source: ESP x509 certificate bundle");
+#else
+    ESP_LOGW(TAG, "HTTPS trust source is not configured");
+#endif
+
     return ESP_OK;
 }
 
@@ -96,7 +106,7 @@ esp_err_t ota_update(const char *url)
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
 
     if (update_partition == NULL) {
-        ESP_LOGE(TAG, "No OTA partition found!");
+        ESP_LOGE(TAG, "No OTA partition found");
         return ESP_FAIL;
     }
 
@@ -106,11 +116,18 @@ esp_err_t ota_update(const char *url)
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "[2/4] Connecting with HTTPS...");
 
+#if !defined(OTA_SERVER_CERT_EMBEDDED) && !defined(CONFIG_EXAMPLE_USE_CERT_BUNDLE)
+    ESP_LOGE(TAG, "No HTTPS trust source configured. Enable cert bundle or add certs/ota_server_cert.pem");
+    return ESP_ERR_INVALID_STATE;
+#endif
+
     esp_http_client_config_t config = {
         .url = url,
         .timeout_ms = 30000,
         .keep_alive_enable = true,
-#ifdef CONFIG_EXAMPLE_USE_CERT_BUNDLE
+#ifdef OTA_SERVER_CERT_EMBEDDED
+        .cert_pem = ota_server_cert_pem_start,
+#elif defined(CONFIG_EXAMPLE_USE_CERT_BUNDLE)
         .crt_bundle_attach = esp_crt_bundle_attach,
 #endif
     };
