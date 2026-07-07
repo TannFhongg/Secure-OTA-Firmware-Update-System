@@ -1,22 +1,44 @@
-# Build files
+# ESP-IDF build output
 build/
+managed_components/
 sdkconfig
 sdkconfig.old
+
+# Generated artifacts and logs
+*.elf
+*.map
+*.log
 
 # Local security material
 secure_boot_signing_key.pem
 signature_verification_key.bin
-*.key
 certs/*.crt
+certs/*.der
+certs/*.key
 certs/*.pem
+*.p12
 
-# IDE
+# Local environment files
+.env
+.env.*
+*.local
+
+# IDE and editor files
 .vscode/
 .idea/
+*.code-workspace
+*.swp
+*.swo
 
-# Python
+# Python cache and virtual environments
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
 
-# Documentation (not committed)
-*.md
+# OS and temp files
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
